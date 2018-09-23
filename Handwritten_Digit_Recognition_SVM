@@ -1,0 +1,254 @@
+# Loading Libraries
+library(kernlab) # for SVM model
+library(readr)
+library(caret)
+library(caTools)
+library(dplyr)
+library(gridExtra)
+
+#Loading Data
+mnist_train <- read.delim("mnist_train.csv",sep=",",stringsAsFactors = FALSE,header = FALSE)
+mnist_test <- read.delim("mnist_test.csv",sep=",",stringsAsFactors = FALSE,header = FALSE)
+
+#Understanding Dimensions
+dim(mnist_train)
+dim(mnist_test)
+
+#Structure of the dataset
+str(mnist_train)
+str(mnist_test)
+
+#printing first few rows
+head(mnist_train)
+head(mnist_test)
+
+#Exploring the data
+summary(mnist_train)
+summary(mnist_test)
+
+#-------------------EDA--------------------
+#checking missing value
+sapply(mnist_train, function(x) sum(is.na(x)))
+
+# Any digit below 0 and above 9 ?
+which((mnist_train %>% select(V1)) > 9 | (mnist_train %>% select(V1)) < 0)
+#  integer(0)
+
+# Convert V1 column to factor for both data sets
+mnist_train$V1 <- as.factor(mnist_train$V1)
+mnist_test$V1<- as.factor(mnist_test$V1)
+
+set.seed(100)
+train_sample1 <- sample.split(mnist_train$V1,SplitRatio = 0.667)
+train_sample1<- mnist_train[train_sample1,]
+# nrow(train_sample1) = 40003
+
+train_sample2 <- sample.split(mnist_train$V1,SplitRatio = 0.333)
+train_sample2 <- mnist_train[train_sample2,]
+# nrow(train_sample2) = 19997
+
+plot1<- ggplot(train_sample1) + 
+  geom_bar(aes(x=as.factor(V1)),fill="gold",col="black") +
+  scale_y_continuous(breaks = seq(0,4700,500)) +
+  labs(title="Distribution Case 1\nTrainSet = 40021 rows",x="Digit",y="Frequency")
+
+plot2 <- ggplot(train_sample2) + 
+  geom_bar(aes(x=as.factor(V1)),fill="orange",col="black") +
+  scale_y_continuous(breaks = seq(0,2400,200)) +
+  labs(title="Distribution Case 2\nTrainSet = 19979 rows",x="Digit",y="Frequency")
+
+grid.arrange(plot1, plot2)
+
+# Conclusion : The distribution of pixels for all digits in both the cases looks similar
+#            : even occurrances of each digit is similar
+#            : hence we will use train_sample2 dataframe in order to keep the computation time low
+
+train_set<-train_sample2
+
+#---------------- Model Building(Linear)--------------
+
+#####################################################################
+# Linear model - SVM  with Cost(C) = 1
+#####################################################################
+model_1<-ksvm(V1~., data=train_set, scaled=FALSE,C=1)
+
+# Predicting the model results 
+evaluate_1<- predict(model_1, mnist_test)
+
+# Confusion Matrix - Finding accuracy, Sensitivity and specificity
+confusionMatrix(evaluate_1, mnist_test$V1)
+
+# Accuracy  : 0.9673
+#             Class: 0 Class: 1 Class: 2 Class: 3 Class: 4 Class: 5 Class: 6 Class: 7 Class: 8 Class: 9
+#Sensitivity   0.9888   0.9894   0.9661   0.9683   0.9684   0.9563   0.9791   0.9543   0.9610   0.9386        
+#Specificity   0.9970   0.9977   0.9967   0.9947   0.9962   0.9967   0.9973   0.9960   0.9952   0.9961
+
+#####################################################################
+# Linear model - SVM  with Cost(C) = 10
+#####################################################################
+model_10<-ksvm(V1~., data=train_set, scaled=FALSE,C=10)
+
+# Predicting the model results 
+evaluate_10<- predict(model_10, mnist_test)
+
+# Confusion Matrix - Finding accuracy, Sensitivity and specificity
+confusionMatrix(evaluate_10, mnist_test$V1)
+
+# Accuracy  : 0.9757
+#             Class: 0 Class: 1 Class: 2 Class: 3 Class: 4 Class: 5 Class: 6 Class: 7 Class: 8 Class: 9
+#Sensitivity    0.9918   0.9894   0.9748   0.9733   0.9735   0.9697   0.9854   0.9689   0.9661   0.9623
+#Specificity    0.9971   0.9988   0.9964   0.9966   0.9972   0.9978   0.9985   0.9964   0.9975   0.9968
+
+
+#####################################################################
+# Hyperparameter tuning and Cross Validation  - Linear - SVM 
+######################################################################
+
+# We will use the train function from caret package to perform crossvalidation
+
+trainControl <- trainControl(method="cv", number=5)
+# Number - Number of folds 
+# Method - cross validation
+
+metric <- "Accuracy"
+
+set.seed(100)
+
+# making a grid of C values. 
+grid <- expand.grid(C=seq(1, 5, by=1))
+
+# Performing 5-fold cross validation
+fit.svm <- train(V1~., data=train_sample2, method="svmLinear", metric=metric, 
+                 tuneGrid=grid, trControl=trainControl)
+
+# Printing cross validation result
+print(fit.svm)
+
+# Best tune at C=1, 
+# Accuracy - 0.911958
+
+# Plotting "fit.svm" results
+plot(fit.svm)
+
+###############################################################################
+
+# Valdiating the model after cross validation on test data
+
+evaluate_linear_test<- predict(fit.svm, mnist_test)
+confusionMatrix(evaluate_linear_test, mnist_test$V1)
+
+#          Accuracy : 0.9133
+#              Class: 0 Class: 1 Class: 2 Class: 3 Class: 4 Class: 5 Class: 6 Class: 7 Class: 8 Class: 9
+#Sensitivity    0.9776   0.9859   0.9157   0.8960   0.9358   0.8520   0.9436   0.9086   0.8275   0.8751
+#Specificity    0.9937   0.9950   0.9877   0.9823   0.9884   0.9869   0.9958   0.9919   0.9916   0.9904
+
+
+# ------------------Model Building(Non-Linear)----------------
+
+######################################################################
+# Non-Linear - Kernels
+######################################################################
+
+# RBF kernel 
+model_rbf <- ksvm(V1 ~ ., data =train_sample2,scaled=FALSE, kernel = "rbfdot")
+
+# Predicting the model results 
+Eval_RBF<- predict(model_rbf, mnist_test)
+
+#confusion matrix - RBF Kernel
+confusionMatrix(Eval_RBF,mnist_test$V1)
+
+#           Accuracy : 0.9672 
+#               Class: 0 Class: 1 Class: 2 Class: 3 Class: 4 Class: 5 Class: 6 Class: 7 Class: 8 Class: 9
+# Sensitivity    0.9888   0.9894   0.9661   0.9683   0.9684   0.9552   0.9791   0.9543   0.9610   0.9386
+# Specificity    0.9970   0.9977   0.9967   0.9945   0.9962   0.9967   0.9973   0.9960   0.9952   0.9961
+
+
+############   Hyperparameter tuning and Cross Validation #####################
+
+# We will use train function from caret package to perform Cross Validation. 
+# traincontrol function Controls the computational nuances of the train function.
+# i.e. method =  CV means  Cross Validation.
+#      Number = 2 implies Number of folds in CV.
+
+# Using parallel processing to improve the performance of time taken in tarining the model
+
+# Loading libraries (under "caret" package)
+library(parallel)
+library(doParallel)
+
+# assigining cores to be used for parallel processing
+cluster <- makeCluster(3) 
+
+# register the cluster
+registerDoParallel(cluster)
+
+# defining parameters that control the train function
+trainControl <- trainControl(method="cv", number=3,allowParallel = TRUE)
+
+
+# Metric <- "Accuracy" implies our Evaluation metric is Accuracy.
+metric <- "Accuracy"
+
+#Expand.grid function does a cartesian product of the parameters we define
+set.seed(7)
+grid <- expand.grid(.sigma=c(0.63e-7,1.63e-7,2.63e-7), .C=c(1,2,3) )
+
+
+# Performing 3-fold cross validation
+fit.svm <- train(V1~., data=train_sample2, method="svmRadial", metric=metric, 
+                 tuneGrid=grid, trControl=trainControl)
+
+# De-register the cluster
+stopCluster(cluster)
+
+print(fit.svm)
+#Resampling: Cross-Validated (3 fold) 
+#Summary of sample sizes: 13318, 13321, 13319 
+#Resampling results across tuning parameters:
+  
+# sigma     C  Accuracy   Kappa    
+#6.30e-08  1  0.9414889  0.9349676
+#6.30e-08  2  0.9485966  0.9428668
+#6.30e-08  3  0.9528010  0.9475395
+#1.63e-07  1  0.9611096  0.9567745
+#1.63e-07  2  0.9666654  0.9629495
+#1.63e-07  3  0.9684171  0.9648965
+#2.63e-07  1  0.9684673  0.9649527
+#2.63e-07  2  0.9719209  0.9687912
+#2.63e-07  3  0.9726216  0.9695699
+
+# The final values used for the model were sigma = 2.63e-07 and C = 3
+plot(fit.svm)
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+
+# ------------------Model Evaluation----------------
+model_RBF_final <- ksvm(V1~., data=train_sample2,kernel="rbfdot",scaled=FALSE,C=3,kpar=list(sigma=2.63e-07))
+
+model_RBF_final
+#  parameter : cost C = 3 
+#  Hyperparameter  : sigma = 2.63e-07 
+#  Number of Support Vectors : 6311 
+#  Training error : 0.001101 
+
+# training accuracy 
+eval_model_final_train <- predict(model_RBF_final,train_sample2)
+confusionMatrix(eval_model_final_train,train_sample2$V1)
+#  train Accuracy = 0.9989 
+
+# test accuracy 
+eval_model_final_test <- predict(model_RBF_final,mnist_test)
+confusionMatrix(eval_model_final_test,mnist_test$V1)
+#  test Accuracy = 0.9777 
+
+
+#--------------Final Conclusion----------------
+# 1. Accuracy achieved by Linear method is 0.9133 while from Non Linear method is 0.9777
+#    Hence the results clearly suggests that Non Lnear model can predict the digits more accurately. 
+# 2. The difference in accuracy obtained between the train and the test advises that the error made by the model is less in number.
+# 3. The final value of sigma is as low as 2.63e-07 which suggests that the model has a low chance of overfitting
+# 4. A fair trade-off is maintatined b/w bias and viariance(overfitting) by choosing the Cost function vale, C as 3 along with sigma as 2.63e-07 
+
